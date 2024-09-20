@@ -29,25 +29,21 @@ Select an action:
 
 global tg_clients
 
-
 def get_session_names() -> list[str]:
     session_names = sorted(glob.glob("sessions/*.session"))
     session_names = [
         os.path.splitext(os.path.basename(file))[0] for file in session_names
     ]
-
-    return session_names
-
+    # Sort session names based on their numeric value
+    return sorted(session_names, key=lambda x: int(x.split('_')[-1]))
 
 def get_proxies() -> list[Proxy]:
     if settings.USE_PROXY_FROM_FILE:
         with open(file="bot/config/proxies.txt", encoding="utf-8-sig") as file:
-            proxies = [Proxy.from_str(proxy=row.strip()).as_url for row in file]
+            proxies = [Proxy.from_str(proxy=row.strip()) for row in file]
     else:
         proxies = []
-
     return proxies
-
 
 async def get_tg_clients() -> list[Client]:
     global tg_clients
@@ -72,7 +68,6 @@ async def get_tg_clients() -> list[Client]:
     ]
 
     return tg_clients
-
 
 async def process() -> None:
     parser = argparse.ArgumentParser()
@@ -104,20 +99,33 @@ async def process() -> None:
     elif action == 2:
         await register_sessions()
 
-
-
-
 async def run_tasks(tg_clients: list[Client]):
     proxies = get_proxies()
-    proxies_cycle = cycle(proxies) if proxies else None
+    
+    # Create a list of (client, proxy) pairs
+    client_proxy_pairs = []
+    for i, client in enumerate(tg_clients):
+        proxy = proxies[i % len(proxies)] if proxies else None
+        client_proxy_pairs.append((client, proxy))
+
+    # Sort the pairs based on the session number
+    client_proxy_pairs.sort(key=lambda x: int(x[0].name.split('_')[-1]))
+
+    # Print session and proxy bindings
+    logger.info("Session and Proxy bindings:")
+    for client, proxy in client_proxy_pairs:
+        session_number = client.name.split('_')[-1]
+        proxy_info = f"{proxy.host}:{proxy.port}" if proxy else "No proxy"
+        logger.info(f"Session {session_number} -> {proxy_info}")
+
     tasks = [
         asyncio.create_task(
             run_tapper(
-                tg_client=tg_client,
-                proxy=next(proxies_cycle) if proxies_cycle else None,
+                tg_client=client,
+                proxy=proxy.as_url if proxy else None,
             )
         )
-        for tg_client in tg_clients
+        for client, proxy in client_proxy_pairs
     ]
 
     await asyncio.gather(*tasks)
